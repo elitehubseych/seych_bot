@@ -1,6 +1,4 @@
-
 import datetime
-import logging
 import threading
 import time
 
@@ -10,19 +8,16 @@ from handlers.registry import command
 from utils.parse import extract_target_id, format_amount
 from utils.vk import display_name_by_vk_id, vk
 
-logger = logging.getLogger(__name__)
-
 DEV_ID = int(config.DEV_ID)
 
 _MSK = datetime.timezone(datetime.timedelta(hours=3))
 
-_ROLES_CACHE = {}          # peer_id -> (timestamp, owner_id, admin_ids)
+_ROLES_CACHE = {}
 _ROLES_TTL_SEC = 300
 _ROLES_LOCK = threading.Lock()
 
 
 def _chat_roles(peer_id):
-    """owner_id и admin_ids беседы через VK API (кэш на 5 минут)."""
     with _ROLES_LOCK:
         cached = _ROLES_CACHE.get(peer_id)
         if cached and time.monotonic() - cached[0] < _ROLES_TTL_SEC:
@@ -32,8 +27,7 @@ def _chat_roles(peer_id):
         settings = raw.get("chat_settings") or {}
         owner_id = int(settings.get("owner_id") or 0)
         admin_ids = {int(x) for x in (settings.get("admin_ids") or [])}
-    except Exception as error:
-        logger.warning("Не удалось получить роли беседы %s: %s", peer_id, error)
+    except Exception:
         owner_id, admin_ids = None, set()
     with _ROLES_LOCK:
         _ROLES_CACHE[peer_id] = (time.monotonic(), owner_id, admin_ids)

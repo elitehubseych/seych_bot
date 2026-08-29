@@ -11,7 +11,6 @@ MSK = datetime.timezone(datetime.timedelta(hours=3))
 
 
 def _when_text(ready_at):
-    """«завтра в 15:00 по МСК» / «сегодня в ...» / «05.09 в ...»."""
     if ready_at is None:
         return "завтра"
     local = ready_at.astimezone(MSK)

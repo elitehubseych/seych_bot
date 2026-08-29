@@ -1,6 +1,5 @@
 
 import io
-import logging
 import secrets
 from datetime import timezone
 
@@ -33,8 +32,6 @@ from utils.receipt import (
     _upload_photo_for_dm,
 )
 from utils.vk import group_info, user_sex, vk
-
-logger = logging.getLogger(__name__)
 
 CERT_WIDTH = WIDTH
 CERT_HEIGHT = HEIGHT

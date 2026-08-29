@@ -21,7 +21,6 @@ def parse_amount(text, default=1000):
         return None
 
     number_str = match.group(1)
-    # Точки между группами из 3 цифр — разделители тысяч: 1.500.000 → 1500000
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", number_str):
         number_str = number_str.replace(".", "")
     number = float(number_str)

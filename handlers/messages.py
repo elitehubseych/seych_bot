@@ -1,5 +1,3 @@
-
-import logging
 import threading
 import time
 
@@ -10,11 +8,8 @@ from handlers.registry import COMMANDS
 from utils.users import ensure_users, extract_mentioned_ids
 from utils.vk import send_plain, send_reply
 
-logger = logging.getLogger(__name__)
-
 CHAT_PEER_ID_MIN = 2000000000
 
-# Команды, ответы на которые уходят реплаем на сообщение-триггер
 REPLY_COMMANDS = {"бонус", "ежедневный", "банк", "промо", "промокод"}
 
 
@@ -58,26 +53,19 @@ def handle_message_new(data):
     if vk_id < 0:
         return
 
-    # ── листенер mute-команды в PEER_BASE → уведомление в PEER_ELITE ──
     try:
         check_mute_notify(vk_id, peer_id, text)
     except Exception:
-        logger.exception("mute_notify check failed")
-
-    if peer_id < CHAT_PEER_ID_MIN:
-        logger.info("ЛС: from=%s text=%r", vk_id, (text or "")[:60])
+        pass
 
     try:
         user = db.get_user(vk_id)
         if user is None:
-            logger.error("Не удалось получить пользователя %s", vk_id)
             return
 
-        # ── мгновенный ответ: сначала ищем команду, тяжёлую статистику — в фон ──
         command, args = split_command(text)
         handler = COMMANDS.get(command)
 
-        # Фон: ensure_users / ensure_chat_member / bump / +1 элита — не блокируем ответ
         _mids = extract_mentioned_ids(text)
         _is_chat = peer_id >= CHAT_PEER_ID_MIN
         _uid = vk_id
@@ -87,20 +75,20 @@ def handle_message_new(data):
                 if _mids:
                     ensure_users(_mids)
             except Exception:
-                logger.exception("ensure_users bg failed")
+                pass
             if _is_chat:
                 try:
                     db.ensure_chat_member(_pid, _uid)
                 except Exception:
-                    logger.exception("ensure_chat_member bg failed")
+                    pass
                 try:
                     db.bump_messages(_pid, _uid)
                 except Exception:
-                    logger.exception("bump_messages bg failed")
+                    pass
                 try:
                     db.update_balance(_uid, 1)
                 except Exception:
-                    logger.exception("update_balance bg failed")
+                    pass
         threading.Thread(target=_bg_bookkeep, daemon=True).start()
 
         if handler is None:
@@ -110,16 +98,12 @@ def handle_message_new(data):
         try:
             answer = handler(user, args, message)
         except Exception:
-            logger.exception("Ошибка команды %s", command)
             answer = "⚠️ Ошибка, попробуй ещё раз"
         took_ms = int((time.monotonic() - started) * 1000)
-        if took_ms > 1500:
-            logger.warning("Медленная команда %s: %s мс", command, took_ms)
         if answer:
             if command in REPLY_COMMANDS:
                 send_reply(peer_id, conversation_message_id, answer)
             else:
-                # Обычное сообщение без reply: реплаи падают и нагружают чат
                 send_plain(peer_id, answer)
-    except Exception as error:
-        logger.exception("Ошибка обработки сообщения от %s: %s", vk_id, error)
+    except Exception:
+        pass

@@ -1,24 +1,7 @@
-"""
-Листенер команды mute в PEER_BASE -> уведомление в PEER_ELITE.
-
-Формат команды (в PEER_BASE):
-    mute @user/link/id 30 минут
-    Спам
-
-Уведомление в PEER_ELITE:
-    Разработчик / Администратор выдал мут Имя на срок.
-    Причина: Спам
-
-Не создаёт мут — только логирует и уведомляет.
-"""
-
-import logging
 import re
 
 from config import config
 from utils.vk import send_plain, get_full_name, mention
-
-logger = logging.getLogger(__name__)
 
 _DURATION = (
     r"("
@@ -33,12 +16,12 @@ _DURATION = (
 
 _TARGET = (
     r"(?:"
-    r"\[id(\d+)\|[^\]]*\]|"      # [id123|Name]
-    r"\[club(\d+)\|[^\]]*\]|"    # [club123|Name]
-    r"@(\w+)|"                   # @username
-    r"id(\d+)|"                  # id123
-    r"(vk\.com/\S+)|"            # vk.com/id123
-    r"(\d+)"                     # 123456
+    r"\[id(\d+)\|[^\]]*\]|"
+    r"\[club(\d+)\|[^\]]*\]|"
+    r"@(\w+)|"
+    r"id(\d+)|"
+    r"(vk\.com/\S+)|"
+    r"(\d+)"
     r")"
 )
 
@@ -116,6 +99,5 @@ def check_mute_notify(vk_id, peer_id, text):
 
     try:
         send_plain(config.PEER_ELITE, msg)
-        logger.info("mute notify: actor=%s target=%s peer=%s reason=%r", vk_id, target_id, peer_id, reason)
-    except Exception as e:
-        logger.error("mute notify failed: %s", e)
+    except Exception:
+        pass

@@ -1,6 +1,5 @@
 
 import json
-import logging
 import random
 import re
 import threading
@@ -18,15 +17,11 @@ from handlers.registry import DEAD_SESSION, command
 from utils.parse import extract_target_id, format_amount, parse_amount
 from utils.vk import display_name_by_vk_id, mention, vk
 
-logger = logging.getLogger(__name__)
-
 
 def _safe_name(vk_id):
-    """Имя/ник без риска уронить экран: любые проблемы -> простая подстановка."""
     try:
         return display_name_by_vk_id(vk_id)
     except Exception:
-        logger.exception("Не удалось получить имя vk=%s", vk_id)
         try:
             return mention(vk_id, "игрок")
         except Exception:
@@ -34,16 +29,14 @@ def _safe_name(vk_id):
 
 MSK = ZoneInfo("Europe/Moscow")
 
-# Тарифы кредитов: сумма, срок, число платежей, ставка в % и минимальный рейтинг.
 LOAN_TIERS = [
-    {"amount": 100_000, "days": 5, "parts": 5, "rate": 10, "min_rating": 40},     # вернуть 110.000
-    {"amount": 350_000, "days": 7, "parts": 7, "rate": 15, "min_rating": 50},     # вернуть 402.500
-    {"amount": 500_000, "days": 14, "parts": 2, "rate": 20, "min_rating": 70},    # вернуть 600.000
-    {"amount": 1_000_000, "days": 21, "parts": 3, "rate": 30, "min_rating": 90},  # вернуть 1.300.000
+    {"amount": 100_000, "days": 5, "parts": 5, "rate": 10, "min_rating": 40},
+    {"amount": 350_000, "days": 7, "parts": 7, "rate": 15, "min_rating": 50},
+    {"amount": 500_000, "days": 14, "parts": 2, "rate": 20, "min_rating": 70},
+    {"amount": 1_000_000, "days": 21, "parts": 3, "rate": 30, "min_rating": 90},
 ]
 LOAN_LOG_LIMIT = 8
 
-# Контекст клика для активной доставки снекбаров (см. _snack)
 _EVENT_CTX = threading.local()
 
 COMMISSION_RATE = 0.15
@@ -73,8 +66,6 @@ NOT_YOUR_PHRASES = [
 
 
 def _snack(text):
-    """Снекбар активным вызовом sendMessageEventAnswer (как coin._reject),
-    при неудаче — временное сообщение с автоскрытием."""
     ctx = getattr(_EVENT_CTX, "event", None)
     if ctx:
         try:
@@ -157,9 +148,6 @@ def _transactions_text(vk_id):
         elif kind == "transfer_in":
             lines.append(f"{name} перевёл Вам {amount} ({_fmt_src(row['source'])})")
     return "\n".join(lines)
-
-
-# ------------------------------------------------------------ кредиты
 
 
 def _plural_payments(n):
@@ -380,11 +368,7 @@ ASYNC_SEND = True
 
 
 def _send_view(session, text, keyboard=None, reply_to=None):
-    """Отправка экрана в фоне: VK ждёт ответ на кнопку ~3 секунды,
-    а удалить старое сообщение + отправить новое успеваем не всегда."""
     def _work():
-        # reply_to игнорируется: реплаи часто падают и нагружают чат.
-        # Сначала пробуем отредактировать существующее сообщение — меньше спама.
         cmid = session.get("cmid")
         if cmid:
             try:
@@ -413,7 +397,7 @@ def _send_view(session, text, keyboard=None, reply_to=None):
             if isinstance(sent, dict) and sent.get("conversation_message_id"):
                 session["cmid"] = sent["conversation_message_id"]
         except Exception:
-            logger.exception("Не удалось отправить экран банка")
+            pass
 
     if ASYNC_SEND:
         threading.Thread(target=_work, daemon=True).start()
@@ -452,10 +436,6 @@ def cmd_bank(user, args, message):
     peer = message.get("peer_id") or 0
     if peer < CHAT_PEER_ID_MIN:
         return "🏦 Банк работает только в беседах!"
-    logger.info(
-        "cmd_bank: vk=%s args=%r peer=%s",
-        user.get("vk_id"), (args or "")[:30], peer,
-    )
     tokens = (args or "").split(maxsplit=1)
     head = tokens[0].lower() if tokens else ""
     rest = tokens[1] if len(tokens) > 1 else ""
@@ -516,7 +496,7 @@ def _immediate_repay(user, raw, peer=None):
     vk_id = user["vk_id"]
     rest = (raw or "").strip().lower()
     if rest and rest.split()[0] not in ("все", "всё"):
-        return None  # мусор после команды — молчим
+        return None
 
     if rest:
         result = loans.repay_all(vk_id, peer)
@@ -546,7 +526,7 @@ def _immediate_repay(user, raw, peer=None):
     from_bank = result.get("from_bank") or 0
     note = ", из них %s со счёта" % format_amount(from_bank) if from_bank else ""
 
-    if rest:  # погасить все
+    if rest:
         return (
             "✅ Кредит погашен полностью!\n"
             "💸 Списано: %s%s\n🎉 Кредит закрыт, рейтинг вырос 📈" % (format_amount(amount), note)
@@ -564,7 +544,6 @@ def _immediate_repay(user, raw, peer=None):
 
 def _immediate(user, raw, deposit):
     raw = (raw or "").strip()
-    # Строго один аргумент: «вложить все» — да, «вложить все все привет» — молчим
     parts = raw.split()
     if len(parts) != 1:
         return None
@@ -885,7 +864,7 @@ def _execute_paybank(session, source):
         vk.messages.send(peer_id=session["peer"], message=response_text,
                          random_id=random.randrange(2**31))
     except Exception:
-        logger.exception("Не удалось отправить итог paybank")
+        pass
 
     threading.Thread(
         target=send_transfer_receipts,

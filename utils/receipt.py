@@ -1,7 +1,6 @@
 
 import io
 import json
-import logging
 import os
 import secrets
 import time
@@ -15,8 +14,6 @@ from vk_api.exceptions import ApiError
 import db
 from utils.parse import format_amount
 from utils.vk import display_name, group_info, vk
-
-logger = logging.getLogger(__name__)
 
 WIDTH, HEIGHT = 900, 850
 CARD_MARGIN = 60
@@ -72,7 +69,6 @@ def _fetch_circle_avatar(url, size=72):
         resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
     except Exception:
-        logger.warning("Не удалось скачать аватар %s", url)
         img = Image.new("RGB", (size, size), COLOR_CARD)
 
     img = img.resize((size, size))
@@ -91,7 +87,6 @@ def _get_profiles(vk_ids):
         info = vk.users.get(user_ids=positive_ids, fields="photo_100")
         return {int(item["id"]): item for item in info}
     except Exception:
-        logger.exception("Не удалось получить профили VK: %s", positive_ids)
         return {}
 
 
@@ -147,15 +142,10 @@ def _get_chat_info(peer_id):
             photo = _photo_url_from(chat_settings) or _photo_url_from(conversation)
             if title:
                 return {"title": title, "photo": photo}
-            logger.warning(
-                "getConversationsById вернул item без названия для %s: %s",
-                peer_id,
-                json.dumps(item, ensure_ascii=False)[:400],
-            )
     except ApiError as error:
-        logger.warning("getConversationsById не дал данных для %s: %s", peer_id, error)
+        pass
     except Exception as error:
-        logger.warning("Сбой getConversationsById для %s: %r", peer_id, error)
+        pass
 
     try:
         result = vk.messages.getChatPreview(peer_id=peer_id)
@@ -166,11 +156,11 @@ def _get_chat_info(peer_id):
             return {"title": title, "photo": photo}
     except ApiError as error:
         if error.code not in (27, 100, 901, 113):
-            logger.exception("Не удалось получить preview беседы %s", peer_id)
+            pass
         else:
-            logger.warning("Preview беседы для %s недоступен: %s", peer_id, error)
+            pass
     except Exception:
-        logger.exception("Не удалось получить preview беседы %s", peer_id)
+        pass
 
     try:
         chat_id = peer_id - 2_000_000_000
@@ -178,11 +168,9 @@ def _get_chat_info(peer_id):
         return {"title": result.get("title", "Беседа"), "photo": result.get("photo_100")}
     except ApiError as error:
         if error.code in (27, 100, 901, 113):
-            logger.warning("В группе нет доступа к данным беседы %s: %s", peer_id, error)
             return None
         raise
     except Exception:
-        logger.exception("Не удалось получить данные беседы %s", peer_id)
         return None
 
 
@@ -315,12 +303,6 @@ def _upload_photo_for_dm(peer_id, image_bytes):
             return f"photo{photo['owner_id']}_{photo['id']}"
         except (requests.exceptions.RequestException, ValueError, KeyError, ApiError) as error:
             last_error = error
-            logger.warning(
-                "Не удалось загрузить фото-чек для %s (попытка %s/3): %s",
-                peer_id,
-                attempt + 1,
-                error,
-            )
             if attempt < 2:
                 time.sleep(0.5 * (attempt + 1))
                 continue
@@ -359,20 +341,15 @@ def send_transfer_receipts(peer_id, sender_id, receiver_id, amount_text, commiss
             )
         except ApiError as error:
             if error.code == 901:
-                logger.warning(
-                    "Пользователь %s запретил сообщения от сообщества, чек не отправлен",
-                    recipient_id,
-                )
                 continue
-            logger.exception("Не удалось отправить чек пользователю %s", recipient_id)
+            raise
         except Exception:
-            logger.exception("Не удалось отправить чек пользователю %s", recipient_id)
+            raise
 
 
 def build_deal_image(seller_id, buyer_id, title_text, biz_name, price_text,
                      commission_text, net_text, transaction_id, peer_id,
                      stamp_text):
-    """Чек сделки с бизнесом: продавец/покупатель + печать Продано/Куплено."""
     profiles = _get_profiles([seller_id, buyer_id])
     seller_info = profiles.get(seller_id, {})
     buyer_info = profiles.get(buyer_id, {})
@@ -417,7 +394,6 @@ def build_deal_image(seller_id, buyer_id, title_text, biz_name, price_text,
     now_label = time.strftime("%d.%m.%Y %H:%M")
     draw.text((x_right, y + 24), now_label, font=FONT_LABEL, fill=COLOR_MUTED, anchor="ra")
 
-    # Печать
     stamp_color = (90, 200, 120) if stamp_text == "Куплено" else (230, 110, 100)
     cx, cy, r = WIDTH - CARD_MARGIN - 130, HEIGHT - CARD_MARGIN - 150, 86
     stamp_layer = Image.new("RGBA", (r * 2 + 20, r * 2 + 20), (0, 0, 0, 0))
@@ -439,7 +415,6 @@ def build_deal_image(seller_id, buyer_id, title_text, biz_name, price_text,
 
 
 def send_business_receipts(seller_id, buyer_id, biz_name, amount, commission, net):
-    """ЛС-чеки обеим сторонам: продавцу «Продано», покупателю «Куплено»."""
     amount_text, commission_text, net_text = (
         format_amount(int(amount)), format_amount(int(commission)), format_amount(int(net)),
     )
@@ -469,8 +444,7 @@ def send_business_receipts(seller_id, buyer_id, biz_name, amount, commission, ne
             )
         except ApiError as error:
             if error.code == 901:
-                logger.warning("%s запретил сообщения от сообщества — чек сделки не отправлен", recipient_id)
                 continue
-            logger.exception("Не удалось отправить чек сделки %s", recipient_id)
+            raise
         except Exception:
-            logger.exception("Не удалось отправить чек сделки %s", recipient_id)
+            raise

@@ -1,6 +1,5 @@
 
 import json
-import logging
 import random
 import re
 import threading
@@ -16,8 +15,6 @@ from handlers import loans
 from handlers.registry import DEAD_SESSION, command
 from utils.parse import extract_target_id, format_amount, parse_amount
 from utils.vk import display_name, display_name_by_vk_id, mention, vk, vk_session
-
-logger = logging.getLogger(__name__)
 
 GAMES = {}
 GAMES_LOCK = threading.Lock()
@@ -127,7 +124,7 @@ def _temp_chat_message(peer_id, text):
         timer.daemon = True
         timer.start()
     except Exception:
-        logger.exception("Не удалось отправить временное сообщение peer_id=%s", peer_id)
+        pass
 
 
 def _reject(event_id, user_id, peer_id, text):
@@ -381,7 +378,6 @@ def _broke_target_reply(name):
 
 
 def _send_duel_prompt(peer_id, text, keyboard, reply_to=None):
-    # reply_to игнорируется: реплаи часто падают и нагружают чат
     params = {
         "peer_ids": [peer_id],
         "message": text,
@@ -447,7 +443,6 @@ def _delete_game_message(game):
 
 
 def _send_result(game, text, keyboard=None):
-    """Итоговое сообщение игры (без reply)."""
     params = {
         "peer_id": game["peer_id"],
         "message": text,
@@ -459,7 +454,6 @@ def _send_result(game, text, keyboard=None):
 
 
 def _replace_game_message(game, text, keyboard):
-    # Сначала пробуем отредактировать существующее сообщение — меньше спама.
     cmid = game.get("cmid")
     if cmid and game.get("peer_id") is not None:
         try:
@@ -486,7 +480,7 @@ def _replace_game_message(game, text, keyboard):
         game["cmid"] = _extract_message_id(sent) or game.get("cmid")
         game["prompt"] = text
     except Exception:
-        logger.exception("Не удалось заменить игровое сообщение game_id=%s", game.get("game_id"))
+        pass
 
 
 def _cleanup_peer_games(peer_id):
@@ -524,7 +518,7 @@ def _timeout_game(game_id, gen):
             f"{display_name_by_vk_id(game['initiator_id'])} ждал 2 минуты без ответа после последнего хода.\nИгра была завершена ⏳",
         )
     except Exception:
-        logger.exception("Не удалось отправить сообщение о таймауте game_id=%s", game_id)
+        pass
     _delete_game_message(game)
     with GAMES_LOCK:
         if GAMES.get(game_id) is game:
@@ -596,7 +590,6 @@ def _roulette_keyboard(game_id):
 
 
 def _settle(game, winner_id, loser_id):
-    """Выплата победителю; при просрочке кредита часть уходит в погашение."""
     amount = game["amount"]
     collected = 0
     if bool(game.get("escrow")):
@@ -687,7 +680,7 @@ def _unmute_later(peer_id, vk_id, delay_sec):
             },
         )
     except Exception as exc:
-        logger.warning("Не удалось снять мут peer_id=%s user_id=%s: %s", peer_id, vk_id, exc)
+        pass
 
 
 def schedule_unmute(peer_id, vk_id, delay_sec):
@@ -730,7 +723,7 @@ def _finish_roulette(game, winner_id, loser_id, side):
         db.set_chat_mute(game["peer_id"], loser_id, MUTE_SECONDS)
         schedule_unmute(game["peer_id"], loser_id, MUTE_SECONDS + 5)
     except Exception as exc:
-        logger.warning("Не удалось выдать мут peer_id=%s user_id=%s: %s", game["peer_id"], loser_id, exc)
+        pass
 
 
 def _process_coin_click(game, user_id, side, event_id=None, peer_id=None):
@@ -871,7 +864,6 @@ def handle_message_event(data):
         try:
             payload = json.loads(payload_raw)
         except Exception:
-            logger.warning("Некорректный payload callback: %r", payload_raw)
             return
 
     game_id = payload.get("game_id")
@@ -885,7 +877,6 @@ def handle_message_event(data):
     if event_id is not None:
         _purge_processed_events()
         if not _mark_event_processed(event_id):
-            logger.warning("Повторная доставка event_id=%s — пропускаем", str(event_id)[:16])
             return
 
     with GAMES_LOCK:

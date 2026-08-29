@@ -1,6 +1,5 @@
 
 import json
-import logging
 import random
 import threading
 import time
@@ -11,8 +10,6 @@ from vk_api import VkApi
 from vk_api.exceptions import ApiError
 
 from config import config
-
-logger = logging.getLogger(__name__)
 
 vk_session = VkApi(token=config.TOKEN_GROUP, api_version="5.199")
 vk = vk_session.get_api()
@@ -40,7 +37,6 @@ def user_sex(vk_id):
         info = vk.users.get(user_ids=vk_id, fields="sex")
         sex = int(info[0].get("sex") or 0)
     except Exception as error:
-        logger.warning("Не удалось определить пол %s: %s", vk_id, error)
         sex = 0
     if sex not in (1, 2):
         sex = 2
@@ -63,7 +59,6 @@ def send_reply(peer_id, conversation_message_id, text):
 
 
 def send_plain(peer_id, text):
-    """Обычное сообщение без reply — быстрее и не нагружает чат."""
     return _send(peer_id, text, forward=None)
 
 
@@ -80,20 +75,15 @@ def _send(peer_id, text, forward):
         return True
     except ApiError as error:
         if error.code == 901:
-            logger.warning(
-                "Юзер %s не знаком с ботом (ошибка 901), сообщение не отправлено",
-                peer_id,
-            )
+            pass
         else:
-            logger.error("Ошибка VK API peer_id=%s: %s", peer_id, error)
+            pass
         return False
     except Exception as error:
-        logger.error("Ошибка отправки сообщения peer_id=%s: %s", peer_id, error)
         return False
 
 
 def _safe_text(text):
-    """Убирает только невидимые управляющие символы, текст не трогаем."""
     cleaned = "".join(
         ch for ch in str(text or "")
         if unicodedata.category(ch) not in ("Cf", "Cc")
@@ -123,7 +113,6 @@ def group_info(group_id):
         items = raw.get("groups") if isinstance(raw, dict) else raw
         info = (items or [{}])[0] or {}
     except Exception as error:
-        logger.warning("Не удалось получить данные сообщества %s: %s", key, error)
         info = {}
     with _GROUP_INFO_LOCK:
         _GROUP_INFO_CACHE[key] = info
@@ -131,7 +120,6 @@ def group_info(group_id):
 
 
 def prefetch_full_names(vk_ids):
-    """Загружает имена пачками (до 100 за один запрос) в кэш."""
     ids = []
     for vk_id in vk_ids:
         try:
@@ -145,7 +133,6 @@ def prefetch_full_names(vk_ids):
         try:
             info = vk.users.get(user_ids=",".join(str(i) for i in chunk))
         except Exception as error:
-            logger.warning("Не удалось пакетно получить имена: %s", error)
             break
         for item in info or []:
             vk_id = int(item.get("id") or 0)
@@ -169,7 +156,7 @@ def get_full_name(vk_id):
             if info:
                 name = f"{info[0]['first_name']} {info[0]['last_name']}"
     except Exception as error:
-        logger.error("Не удалось получить имя VK для %s: %s", vk_id, error)
+        pass
     if not name:
         return "Группа" if vk_id < 0 else "Пользователь"
     name = _safe_text(name)
@@ -189,7 +176,6 @@ def display_name(user):
 
 
 def short_name(vk_id):
-    """Имя/ник без [id|...] — для снекберов."""
     user = db.get_user_readonly(vk_id)
     if user and user.get("nickname"):
         return user["nickname"]
@@ -198,7 +184,6 @@ def short_name(vk_id):
 
 
 def display_name_by_vk_id(vk_id):
-    # кеш на 60 сек — убирает N запросов в титулах/топах
     now = time.monotonic()
     with _DISPLAY_LOCK:
         ent = _DISPLAY_CACHE.get(vk_id)
@@ -212,7 +197,6 @@ def display_name_by_vk_id(vk_id):
 
 
 def bot_mention():
-    """Кликабельное упоминание бота: [clubID|Имя]."""
     try:
         gid = int(str(config.ID_GROUP).strip())
         info = group_info(gid)
@@ -231,5 +215,4 @@ def notify_developer(text):
         )
         return True
     except Exception as error:
-        logger.error("Не удалось уведомить разработчика: %s", error)
         return False

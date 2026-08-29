@@ -24,7 +24,7 @@ class Config:
 config = Config()
 
 _REQUIRED_KEYS = (
-    "TOKEN_GROUP", 
+    "TOKEN_GROUP",
     "ID_GROUP",
     "CONFIRMATION_TOKEN",
     "DATABASE_URL",

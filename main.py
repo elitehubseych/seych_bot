@@ -1,6 +1,5 @@
 
 import json
-import logging
 import threading
 import time
 
@@ -17,17 +16,11 @@ from handlers.coin import schedule_unmute
 from handlers.inventory import handle_message_event as handle_inventory_event
 from handlers.marriage import handle_message_event as handle_marriage_event
 from handlers.messages import handle_message_new
-import handlers.admin  # noqa: F401 — регистрация команд разработчика
-import handlers.commands  # noqa: F401 — команда «команды»
-import handlers.promo  # noqa: F401 — промокоды
+import handlers.admin
+import handlers.commands
+import handlers.promo
 
 from handlers.registry import DEAD_SESSION
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -89,7 +82,6 @@ def callback():
 
         threading.Thread(target=handle_message_new, args=(data,), daemon=True).start()
     else:
-        started = time.monotonic()
         try:
             snackbar = (
                 handle_biz_event(data)
@@ -100,23 +92,14 @@ def callback():
                 or handle_inventory_event(data)
             )
         except Exception:
-            # Любое исключение в цепочке = 500 = кнопка вечно грузится.
-            # Ловим и отвечаем снекбаром, причину смотрим в логах.
-            logger.exception("Ошибка обработки message_event")
             snackbar = {"type": "show_snackbar", "text": "⚠️ Ошибка, попробуй ещё раз"}
-        took_ms = int((time.monotonic() - started) * 1000)
-        if took_ms > 1500:
-            logger.warning("Медленный колбек (%s мс)", took_ms)
 
         if snackbar is DEAD_SESSION:
-            # Кнопка наша, но сессия умерла (рестарт бота) — не даём
-            # кнопке вечно грузиться
             return flask.Response(
                 json.dumps({"type": "show_snackbar", "text": "🕰 Кнопка устарела"}),
                 mimetype="application/json",
             )
         if snackbar:
-            logger.info("Снекбар отправлен за %s мс: %s", took_ms, str(snackbar.get("text"))[:60])
             return flask.Response(json.dumps(snackbar), mimetype="application/json")
         return "ok"
 
@@ -127,8 +110,6 @@ def callback():
 def ping():
     return "ok"
 
-
-# ── Mini App API ─────────────────────────────────────────
 
 @app.route("/api/profile/<int:user_id>", methods=["GET"])
 def api_profile(user_id):
@@ -223,8 +204,6 @@ def api_top():
         return flask.jsonify({"users": []})
 
 
-# ── Mini App Static ──────────────────────────────────────
-
 @app.route("/app")
 @app.route("/app/<path:path>")
 def serve_mini_app(path="index.html"):
@@ -242,5 +221,4 @@ if __name__ == "__main__":
 
         serve(app, host="0.0.0.0", port=5000, threads=12)
     except ImportError:
-        logger.warning("waitress не установлен, используем dev-сервер Flask")
         app.run(host="0.0.0.0", port=5000, debug=False)

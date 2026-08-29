@@ -1,7 +1,6 @@
 
 import datetime
 import json
-import logging
 import random
 import threading
 import uuid
@@ -24,8 +23,6 @@ from utils.items import (
 )
 from utils.parse import extract_target_id, format_amount
 from utils.vk import bot_mention, display_name_by_vk_id, group_info, mention, send_plain, vk
-
-logger = logging.getLogger(__name__)
 
 
 def _m(user_id):
@@ -78,18 +75,13 @@ _TYPE_EMOJI = {
     "Элитный": "💎",
 }
 
-# Контекст текущего клика: снекбары шлём активным вызовом
-# messages.sendMessageEventAnswer (как в coin._reject), а не через
-# тело ответа на callback — так надёжнее.
 _EVENT_CTX = threading.local()
 
-# ── кеш статистики титулов (чтобы не долбить COUNT(*) в цикле) ──
-_TITLE_STATS_CACHE = {}  # title_key -> (ts, pct, owners)
+_TITLE_STATS_CACHE = {}
 _TITLE_STATS_LOCK = threading.Lock()
 _TITLE_STATS_TTL = 60
 
-# ── кеш инвентаря для batch-проверок (короткий ttl на запрос) ──
-_INV_CACHE = {}  # vk_id -> (ts, {key:qty})
+_INV_CACHE = {}
 _INV_CACHE_LOCK = threading.Lock()
 _INV_CACHE_TTL = 3
 
@@ -128,9 +120,6 @@ def _kb(sid, rows):
             })
         buttons.append(line)
     return {"inline": True, "buttons": buttons}
-
-
-# ---------------------------------------------------------------- экраны
 
 
 def _inventory_pages(vk_id):
@@ -299,7 +288,6 @@ def _case_select_view(session, ckey):
 
 
 def _case_inside_view(session, ckey):
-    """Показать содержимое кейса с шансами."""
     from utils.items import _ROLLS, TITLES as TITLES_MAP
     case = CASES[ckey]
     rolls = _ROLLS.get(ckey, [])
@@ -347,7 +335,6 @@ def _apply_prize(vk_id, kind, value):
 
 
 def _case_open_view(session, ckey):
-    """Открывает кейс: списывает ключи, выдаёт приз."""
     vk_id = session["vk"]
     case = CASES[ckey]
     keys_qty = db.item_qty(vk_id, "key")
@@ -454,16 +441,12 @@ def _advent_view(session):
     return "\n".join(lines), _kb(session["sid"], kb_rows)
 
 
-# ---------------------------------------------------------------- движок
-
-
 def _new_session(user, message):
     peer = message.get("peer_id")
     sid = uuid.uuid4().hex[:10]
     session = {
         "sid": sid, "peer": peer, "vk": user["vk_id"],
         "status": "active", "cmid": None,
-        # Экраны шлём обычными сообщениями: reply нагружает чат и VK
         "reply_to": None,
         "lock": threading.Lock(),
     }
@@ -489,11 +472,9 @@ def _send_view(session, built):
         if reply_to:
             kwargs["reply_to"] = reply_to
     except Exception:
-        logger.exception("Не удалось собрать экран инвентаря")
         return
 
     def _work():
-        # Сначала пробуем отредактировать существующее сообщение — меньше спама.
         cmid = session.get("cmid")
         if cmid:
             try:
@@ -514,9 +495,6 @@ def _send_view(session, built):
             except Exception:
                 if "reply_to" not in kwargs:
                     raise
-                # Сообщение, на которое отвечали, могло быть удалено —
-                # повторяем без reply, чтобы экран всё равно ушёл
-                logger.warning("Отправка с reply_to=%s не удалась, повторяем без ответа", kwargs.pop("reply_to"))
                 kwargs["random_id"] = random.randrange(2 ** 31)
                 sent = vk.messages.send(**kwargs)
             try:
@@ -525,11 +503,9 @@ def _send_view(session, built):
             except Exception:
                 pass
         except Exception:
-            logger.exception("Не удалось отправить экран инвентаря")
+            pass
 
     if ASYNC_SEND:
-        # VK ждёт ответ на callback 3 секунды — отправка в фоне,
-        # иначе снекбары не доходят и кнопка «грузит»
         threading.Thread(target=_work, daemon=True).start()
     else:
         _work()
@@ -565,9 +541,6 @@ def _arm_timer(sid):
     timer.start()
 
 
-# ---------------------------------------------------------------- команды
-
-
 @command("инвентарь", "инв")
 def cmd_inventory(user, args, message):
     if args.strip():
@@ -587,7 +560,6 @@ def _titles_view(session):
     ]
     kb_rows = []
     row = []
-    # batch: один запрос вместо 8 item_qty + кеш на pct/owners
     inv_map = _get_inventory_map(vk_id)
     for tkey, meta in TITLES.items():
         qty = inv_map.get(tkey, 0)
@@ -621,7 +593,6 @@ def _titles_view(session):
 @command("титулы", "титул")
 def cmd_titles(user, args, message):
     rest = (args or "").strip().lower()
-    # Подкоманды
     if rest.startswith("подарить"):
         return cmd_title_gift(user, args[len("подарить"):].strip(), message)
     if rest.startswith("продать"):
@@ -641,12 +612,8 @@ def cmd_titles(user, args, message):
     return None
 
 
-# ── титул подарить ─────────────────────────────────────────────────────────────
-
-
 def cmd_title_gift(user, args, message):
     raw = (args or "").strip()
-    # ── бот: титул подарить бот @user [peer]\nсообщение — все титулы, от имени бота ──
     if raw.lower().startswith("бот"):
         if not _is_dev(user["vk_id"]):
             return None
@@ -660,7 +627,6 @@ def cmd_title_gift(user, args, message):
         peer_id, msg_text, err = _parse_bot_title_tail(tail)
         if err == "peer_format":
             return "peer_id должен быть числом (например 2000000001)"
-        # все титулы мира
         titles = list(TITLES.items())
         session = _new_session(user, message)
         session["owner"] = user["vk_id"]
@@ -693,7 +659,6 @@ def cmd_title_gift(user, args, message):
     if target_id == user["vk_id"]:
         return "Нельзя дарить самому себе 😏"
     vk_id = user["vk_id"]
-    # batch: один SELECT вместо N
     inv_map = _get_inventory_map(vk_id)
     titles = []
     for tkey, meta in TITLES.items():
@@ -800,8 +765,6 @@ def cmd_advent(user, args, message):
     return None
 
 
-# ---------------------------------------------------------------- гифты
-
 _GIFT_ITEM_ALIASES = {
     "ключ": "key", "ключи": "key", "key": "key",
     "подарок": "gift_box",
@@ -811,7 +774,6 @@ _GIFT_ITEM_ALIASES = {
 
 
 def _find_item(query):
-    """Точное совпадение по алиасу или названию — без «похожих» слов."""
     q = query.strip().lower()
     if not q:
         return None
@@ -828,12 +790,11 @@ def _async_plain(peer_id, text):
         try:
             send_plain(peer_id, text)
         except Exception:
-            logger.exception("async send_plain failed peer=%s", peer_id)
+            pass
     threading.Thread(target=_w, daemon=True).start()
 
 
 def _parse_bot_item_tail(tail_raw):
-    """Хвост вида '<предмет> [peer_id]\\nсообщение'. Возвращает (item_query, peer|None, msg|None, err)."""
     raw = (tail_raw or "").strip()
     if not raw:
         return None, None, None, "no_item"
@@ -845,7 +806,6 @@ def _parse_bot_item_tail(tail_raw):
     first = first.strip()
     if not first:
         return None, None, msg, "no_item"
-    # кавычки
     m = re.search(r'"([^"]+)"', first)
     if m:
         item_q = m.group(1).strip()
@@ -875,7 +835,6 @@ def _parse_bot_item_tail(tail_raw):
             else:
                 return None, None, msg, "format"
         else:
-            # последний токен peer?
             if parts[-1].isdigit():
                 peer_tok = parts[-1]
                 item_q = " ".join(parts[:-1]).strip('"\'«»')
@@ -897,7 +856,6 @@ def _parse_bot_item_tail(tail_raw):
 
 
 def _parse_bot_title_tail(tail_raw):
-    """Хвост для титул подарить бот: '[peer_id]\\nсообщение'."""
     raw = (tail_raw or "").strip()
     if not raw:
         return None, None, None
@@ -909,7 +867,6 @@ def _parse_bot_title_tail(tail_raw):
     first = first.strip()
     peer = None
     if first:
-        # may contain peer plus extra spaces? only peer allowed
         parts = first.split()
         if len(parts) != 1 or not parts[0].isdigit():
             return None, None, "peer_format"
@@ -921,7 +878,7 @@ def _bot_item_announce(target_id, item_key, case_key, peer_id, msg_text):
     bot = bot_mention()
     taker = _m(target_id)
     if case_key:
-        cname = CASES[case_key]["name"]  # "📦 Кейс «Элитный»"
+        cname = CASES[case_key]["name"]
         boxname = cname.replace("📦 ", "").strip()
         typ = _CASE_TYPE.get(case_key, "Обычный")
         typ_emoji = _TYPE_EMOJI.get(typ, "⭐")
@@ -970,7 +927,6 @@ def _bot_title_announce(target_id, title_key, peer_id, msg_text):
 
 
 def _gift_case_to(user, target_id, ckey):
-    """Передаёт кейс target_id, возвращает текст результата."""
     if target_id == user["vk_id"]:
         return "Себе кейс не подарить 🙃"
     if target_id < 0:
@@ -995,7 +951,6 @@ def _gift_case_to(user, target_id, ckey):
 
 @command("гифт")
 def cmd_gift(user, args, message):
-    # ── бот-подарки: гифт бот @user предмет [peer]\nсообщение ──
     raw = args or ""
     if raw.strip().lower().startswith("бот"):
         if not _is_dev(user["vk_id"]):
@@ -1007,8 +962,6 @@ def cmd_gift(user, args, message):
         if target_id < 0:
             return "Сообществам подарки не нужны 😕"
         tail = rest or ""
-        # хвост может содержать перенос строки уже — rest его сохранил
-        # но если команда была 'гифт бот @user ключ\nтекст', extract_target_id вернёт rest='ключ\nтекст'
         item_q, peer_id, msg_text, err = _parse_bot_item_tail(tail)
         if err == "no_item":
             return "Укажи предмет: гифт бот @user ключ"
@@ -1016,7 +969,6 @@ def cmd_gift(user, args, message):
             return "Формат: гифт бот @user <предмет> [peer_id]\nПример: гифт бот @user ключ 2000000001"
         if err == "peer_format":
             return "peer_id должен быть числом (например 2000000001)"
-        # определяем что дарим: кейс или предмет
         ckey = CASE_ALIASES.get((item_q or "").lower().strip("\\.,!?").rstrip("\\").strip())
         if ckey is not None:
             db.get_user(target_id)
@@ -1049,7 +1001,6 @@ def cmd_gift(user, args, message):
     if target_id is None:
         return "Укажи получателя и предмет: гифт @user ключ"
     target_id, rest = target_id, (rest or "").strip()
-    # Ровно одно слово-предмет: «гифт @user ключ привет» — ошибка формата
     if len(rest.split()) != 1:
         return 'Формат: гифт @user <предмет> (одно слово)'
     if not rest:
@@ -1058,7 +1009,6 @@ def cmd_gift(user, args, message):
     word = rest.lower().strip("\\.,!?")
     case_key = CASE_ALIASES.get(word.rstrip("\\").strip())
     if case_key is not None:
-        # «гифт @user обычный» — это подарок кейса
         return _gift_case_to(user, target_id, case_key)
 
     if target_id == user["vk_id"]:
@@ -1088,7 +1038,6 @@ def cmd_gift(user, args, message):
 @command("гифткейс")
 def cmd_gift_case(user, args, message):
     raw = args or ""
-    # ── бот: гифткейс бот @user бомж [peer]\nсообщение / с кавычками ──
     if raw.strip().lower().startswith("бот"):
         if not _is_dev(user["vk_id"]):
             return None
@@ -1122,7 +1071,6 @@ def cmd_gift_case(user, args, message):
     tail = (rest or "").strip().lower()
     if target_id is None or not tail:
         return "Формат: гифткейс @user бомж\\обычный\\легендарный\\элитный"
-    # Ровно одно слово-тип кейса, лишний текст — отказ
     if len(tail.split()) != 1:
         return "Формат: гифткейс @user бомж\\обычный\\легендарный\\элитный"
 
@@ -1132,9 +1080,6 @@ def cmd_gift_case(user, args, message):
         return "Не понял какой кейс. Формат: гифткейс @user бомж\\обычный\\легендарный\\элитный"
 
     return _gift_case_to(user, target_id, ckey)
-
-
-# ---------------------------------------------------------------- колбеки
 
 
 def handle_message_event(data):
@@ -1177,7 +1122,6 @@ def handle_message_event(data):
             try:
                 return _route(session, act, arg)
             except Exception:
-                logger.exception("Ошибка инвентаря act=%s", act)
                 return _snack("Что-то сломалось, попробуй ещё раз 🛠")
     finally:
         _EVENT_CTX.event = None
@@ -1308,7 +1252,6 @@ def _cached_title_stats(title_key):
 
 
 def _title_rarity_line(title_key):
-    """Строка редкости титула."""
     from utils.items import TITLE_TYPE_ORDER
     meta = TITLES[title_key]
     title_type = meta.get("type", "Обычный")
@@ -1317,7 +1260,6 @@ def _title_rarity_line(title_key):
 
 
 def _get_inventory_map(vk_id):
-    """Batch: один SELECT вместо N item_qty. Короткий кеш на 3 сек."""
     import time as _t
     now = _t.monotonic()
     with _INV_CACHE_LOCK:
@@ -1332,7 +1274,6 @@ def _get_inventory_map(vk_id):
 
 
 def _bot_tgift_pick(session, title_key):
-    # только dev может жать свои кнопки
     if not _is_dev(session.get("vk")):
         return _snack("Только разработчик может дарить от бота")
     target_id = session.get("gift_target")
@@ -1371,7 +1312,6 @@ def _bot_tgift_confirm(session):
         return _snack("Что-то пошло не так 🤷")
     if title_key not in TITLES:
         return _snack("Титул не найден")
-    # от имени бота — просто выдаём, без списания у дарителя
     db.get_user(target_id)
     ok = db.add_item(target_id, title_key, 1)
     if not ok:
@@ -1379,14 +1319,11 @@ def _bot_tgift_confirm(session):
     meta = TITLES[title_key]
     peer_id = session.get("gift_peer")
     msg_text = session.get("gift_msg")
-    # анонсы: в чат peer_id + ЛС
     _bot_title_announce(target_id, title_key, peer_id, msg_text)
-    # закрываем экран подарка
     session["status"] = "closed"
     _delete_message(session)
     with _SESSIONS_LOCK:
         SESSIONS.pop(session["sid"], None)
-    # инвалидируем кеш титулов на всякий
     with _TITLE_STATS_LOCK:
         _TITLE_STATS_CACHE.pop(title_key, None)
     with _INV_CACHE_LOCK:

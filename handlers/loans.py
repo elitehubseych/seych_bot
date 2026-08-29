@@ -1,28 +1,21 @@
-"""Кредиты: график платежей, просрочки, погашение и автосписание с выигрышей."""
-
 import json
-import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import db
 from utils.parse import format_amount
 
-logger = logging.getLogger(__name__)
-
 MSK = ZoneInfo("Europe/Moscow")
 LOG_LIMIT = 8
 
-# --- Кредитный рейтинг ---
-RATING_START = 50       # у нового игрока
+RATING_START = 50
 RATING_MAX = 100
-RATING_MIN_LOAN = 40    # ниже — кредиты закрыты
-DAILY_RECOVER = 2       # +2/день без просрочек
-RATING_DEFAULT = 10     # после невозврата
-PAYMENT_BONUS = 3       # за внесённый платёж
-CLOSE_BONUS = 7         # за полное закрытие кредита
+RATING_MIN_LOAN = 40
+DAILY_RECOVER = 2
+RATING_DEFAULT = 10
+PAYMENT_BONUS = 3
+CLOSE_BONUS = 7
 
-# --- Безнадёжный долг: просрочка старше N дней => арест счетов ---
 OVERDUE_GRACE_SECONDS = 5 * 24 * 60 * 60
 
 
@@ -54,7 +47,6 @@ def parse_dt(value):
 
 
 def build_installments(tier, now):
-    """Платежи с процентами: сумма * (100 + rate) / 100, части по сроку."""
     gross = round(tier["amount"] * (100 + tier["rate"]) / 100)
     base = gross // tier["parts"]
     amounts = [base] * tier["parts"]
@@ -67,7 +59,6 @@ def build_installments(tier, now):
 
 
 def loan_total(tier):
-    """Сколько всего нужно вернуть (тело + проценты)."""
     return round(tier["amount"] * (100 + tier["rate"]) / 100)
 
 
@@ -102,7 +93,6 @@ def _loan_from(user_row):
 
 
 def owed_of(inst):
-    """Сколько осталось платить по конкретному платежу."""
     if inst.get("paid"):
         return 0
     return inst["amt"] - inst.get("part", 0)
@@ -128,7 +118,6 @@ def has_overdue(loan):
 
 
 def oldest_overdue(loan):
-    """Дата самого старого непогашенного просроченного платежа (или None)."""
     now = now_msk()
     dates = [
         parse_dt(item["due"])
@@ -138,13 +127,7 @@ def oldest_overdue(loan):
     return min(dates) if dates else None
 
 
-# ------------------------------------------------------------ рейтинг
-
 def sync_rating(vk_id):
-    """Возвращает рейтинг, начисляя +DAILY_RECOVER за полные дни без просрочек.
-
-    Пока есть непогашенная просрочка — рост заморожен.
-    """
     user = db.get_user(vk_id) or {}
     loan = _loan_from(user)
     rating = int(user.get("credit_rating") or RATING_START)
@@ -172,13 +155,7 @@ def adjust_rating(vk_id, delta):
     return rating
 
 
-# ------------------------------------------------------------ безнадёжный долг
-
 def enforce_default(vk_id, peer_id=None):
-    """Просрочка старше 5 дней: арест счетов, кредит закрыт как невозвращённый.
-
-    Возвращает {"seized": сумма изъятого} либо None если повода нет.
-    """
     user = db.get_user(vk_id)
     loan = _loan_from(user)
     if not loan:
@@ -194,7 +171,6 @@ def enforce_default(vk_id, peer_id=None):
     seized = (info.get("balance") or 0) + on_bank
     if on_bank > 0:
         db.bank_withdraw(vk_id, on_bank)
-    # после снятия с банка наличные изменились — берём всё по свежим данным
     fresh_cash = (db.get_bank_info(vk_id) or {}).get("balance") or 0
     if fresh_cash > 0:
         db.update_balance(vk_id, -fresh_cash)
@@ -205,7 +181,6 @@ def enforce_default(vk_id, peer_id=None):
         clear=True,
     )
     db.set_credit_rating(vk_id, RATING_DEFAULT, now_msk())
-    logger.info("Безнадёжный долг vk_id=%s: изъято %s", vk_id, seized)
     if peer_id and seized > 0:
         try:
             from handlers import business
@@ -228,13 +203,6 @@ def _save(vk_id, loan, user_row, log_text=None, clear=False):
 
 
 def collect_from_win(vk_id, win_amount, peer_id=None):
-    """Автосписание ПРОСРОЧЕННЫХ платежей из выигрыша.
-
-    Работает только когда есть просрочка (дата платежа прошла,
-    а он не оплачен). Будущие платежи не трогает.
-    Если просрочка старше 5 дней — вместо списания арест счетов.
-    Возвращает собранную сумму (0 — списывать нечего).
-    """
     win_amount = int(win_amount or 0)
     if win_amount <= 0:
         return 0
@@ -277,7 +245,6 @@ def collect_from_win(vk_id, win_amount, peer_id=None):
 
 
 def repay_payment(vk_id, peer_id=None):
-    """Оплатить следующий платёж: сначала наличные, недостача — с банковского счёта."""
     defaulted = enforce_default(vk_id, peer_id)
     if defaulted:
         return {"status": "defaulted", "seized": defaulted["seized"]}
@@ -332,7 +299,6 @@ def repay_payment(vk_id, peer_id=None):
 
 
 def repay_all(vk_id, peer_id=None):
-    """Досрочное полное погашение: списывает весь остаток долга сразу."""
     defaulted = enforce_default(vk_id, peer_id)
     if defaulted:
         return {"status": "defaulted", "seized": defaulted["seized"]}

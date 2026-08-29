@@ -1,6 +1,5 @@
 
 import json
-import logging
 import random
 import re
 import threading
@@ -26,8 +25,6 @@ from utils.certificates import (
 from utils.humantime import format_duration
 from utils.parse import extract_target_id
 from utils.vk import display_name_by_vk_id, gform, vk
-
-logger = logging.getLogger(__name__)
 
 BOT_VK_ID = -abs(int(config.ID_GROUP))
 DEV_ID = int(config.DEV_ID) if str(config.DEV_ID).strip() else None
@@ -276,7 +273,7 @@ def _expire_proposal(pid):
             random_id=random.randrange(2**31),
         )
     except Exception:
-        logger.exception("Не удалось отправить сообщение о сгоревшем предложении pid=%s", pid)
+        pass
     with REGISTRY_LOCK:
         if PROPOSALS.get(pid) is proposal:
             PROPOSALS.pop(pid, None)
@@ -304,7 +301,7 @@ def _expire_divorce(did):
             random_id=random.randrange(2**31),
         )
     except Exception:
-        logger.exception("Не удалось отправить сообщение о сгоревшем разводе did=%s", did)
+        pass
     with REGISTRY_LOCK:
         if DIVORCES.get(did) is record:
             DIVORCES.pop(did, None)
@@ -438,7 +435,6 @@ def _propose_marriage(user, args, message, peer_id):
         sent = vk.messages.send(**send_kwargs)
         sent = sent[0] if isinstance(sent, list) else sent
     except Exception:
-        logger.exception("Не удалось отправить предложение pid=%s", pid)
         with REGISTRY_LOCK:
             PROPOSALS.pop(pid, None)
         return "😢 Не удалось отправить предложение. Попробуйте ещё раз!"
@@ -474,12 +470,8 @@ def _fire_bot_accept(pid):
         if married:
             pass
         else:
-            logger.error(
-                "Бот-согласие pid=%s: БРАК НЕ ЗАРЕГИСТРИРОВАН (занят или ошибка БД)", pid
-            )
             _notify_dev_bot_marriage_failed(pid)
     except Exception:
-        logger.exception("Бот не смог принять предложение pid=%s", pid)
         _notify_dev_bot_marriage_failed(pid)
 
 
@@ -489,7 +481,7 @@ def _notify_dev_bot_marriage_failed(pid):
 
         notify_developer(f"⚠️ Брак с ботом pid={pid} не зарегистрирован — глянь логи сервера.")
     except Exception:
-        logger.exception("Не удалось уведомить разработчика о провале pid=%s", pid)
+        pass
 
 
 def _start_divorce(user, peer_id):
@@ -536,7 +528,6 @@ def _start_divorce(user, peer_id):
         )
         sent = sent[0] if isinstance(sent, list) else sent
     except Exception:
-        logger.exception("Не удалось отправить подтверждение развода did=%s", did)
         with REGISTRY_LOCK:
             DIVORCES.pop(did, None)
         return "😢 Не удалось оформить заявление. Попробуйте ещё раз!"
@@ -571,7 +562,6 @@ def _accept_proposal(proposal, event_id, user_id, peer_id):
             if created:
                 proposal["status"] = "done"
             else:
-                logger.error("Не удалось записать брак pid=%s в БД", proposal["pid"])
                 proposal["status"] = "failed"
 
     if proposal.get("status") != "done":
@@ -591,7 +581,7 @@ def _accept_proposal(proposal, event_id, user_id, peer_id):
             try:
                 vk.messages.send(peer_id=peer, message=note, random_id=random.randrange(2**31))
             except Exception:
-                logger.exception("Не удалось отправить заметку об отмене свадьбы pid=%s", proposal["pid"])
+                pass
         return None
 
     accepted = gform(target_id, "принял", "приняла")
@@ -606,11 +596,10 @@ def _accept_proposal(proposal, event_id, user_id, peer_id):
         image = build_marriage_certificate(peer, proposer_id, target_id, created["married_at"])
         send_certificate_to_chat(peer, caption, image.getvalue())
     except Exception:
-        logger.exception("Свидетельство о браке не отправилось pid=%s — шлём текстом", proposal["pid"])
         try:
             vk.messages.send(peer_id=peer, message=caption, random_id=random.randrange(2**31))
         except Exception:
-            logger.exception("Не удалось отправить даже текст о браке pid=%s", proposal["pid"])
+            pass
     return None
 
 
@@ -642,7 +631,7 @@ def _decline_proposal(proposal, event_id, user_id, peer_id):
     try:
         vk.messages.send(peer_id=peer, message=caption, random_id=random.randrange(2**31))
     except Exception:
-        logger.exception("Не удалось отправить сообщение об отказе pid=%s", proposal["pid"])
+        pass
     return None
 
 
@@ -696,11 +685,10 @@ def _confirm_divorce(record, event_id, user_id, peer_id):
         )
         send_certificate_to_chat(peer, caption, image.getvalue())
     except Exception:
-        logger.exception("Свидетельство о разводе не отправилось did=%s — шлём текстом", record["did"])
         try:
             vk.messages.send(peer_id=peer, message=caption, random_id=random.randrange(2**31))
         except Exception:
-            logger.exception("Не удалось отправить даже текст о разводе did=%s", record["did"])
+            pass
     return None
 
 

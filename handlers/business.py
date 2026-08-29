@@ -1,7 +1,6 @@
 
 import datetime
 import json
-import logging
 import random
 import threading
 import time
@@ -12,8 +11,6 @@ from config import config
 from handlers.registry import command
 from utils.parse import extract_target_id, format_amount, parse_amount
 from utils.vk import display_name_by_vk_id, mention, send_plain, vk
-
-logger = logging.getLogger(__name__)
 
 CHAT_PEER_ID_MIN = 2000000000
 BOT_OWNER = 0
@@ -52,7 +49,6 @@ def _is_bot(vk_id):
 
 BASE_PCT = 15
 
-# Лестница улучшений: (тип, значение, цена). Открываются строго поэтапно.
 UPGRADES = [
     ("pct", 30, 50_000),
     ("subsidy", -35, 100_000),
@@ -127,7 +123,6 @@ _MAINTENANCE_LOCK = threading.Lock()
 
 
 def current_pct(upgrades):
-    """Доход владельца в % при данном числе купленных улучшений."""
     pct = BASE_PCT
     for i in range(min(int(upgrades or 0), len(UPGRADES))):
         kind, value, _price = UPGRADES[i]
@@ -148,7 +143,6 @@ def monthly_fee(upgrades, kind=None):
 
 
 def _add_month(dt, months=1):
-    """Дата через N месяцев с сохранением дня (29-31 клампится к концу месяца)."""
     month_index = dt.year * 12 + dt.month - 1 + months
     year, month = divmod(month_index, 12)
     month += 1
@@ -167,8 +161,6 @@ def _fmt_datetime(dt):
 
 
 def charge(chat_id, kind, turnover, client_ids):
-    """Игровой хук: срез с оборота в кассу владельца + статистика клиентов.
-    Владелец бизнеса играет бесплатно — его оборот не идёт в кассу."""
     try:
         if not chat_id or chat_id < CHAT_PEER_ID_MIN or turnover <= 0:
             return
@@ -179,7 +171,6 @@ def charge(chat_id, kind, turnover, client_ids):
             return
         owner_id = int(biz.get("owner_vk") or 0)
         ids = [v for v in (client_ids or []) if v and int(v) > 0]
-        # Владелец не платит сам себе — исключаем из оборота
         if owner_id:
             ids = [v for v in ids if int(v) != owner_id]
         if not ids:
@@ -187,7 +178,7 @@ def charge(chat_id, kind, turnover, client_ids):
         cut = int(turnover) * current_pct(biz["upgrades"]) // 100
         db.biz_turnover(chat_id, kind, ids, cut)
     except Exception:
-        logger.exception("charge(%s, %s)", chat_id, kind)
+        pass
     finally:
         try:
             maybe_maintenance(chat_id, throttled=True)
@@ -204,8 +195,6 @@ def self_loan_phrase():
     return random.choice(SELF_LOAN_PHRASES)
 
 
-# ----------------------------- обслуживание -----------------------------
-
 def _load_meta(biz):
     try:
         meta = json.loads(biz["sale_info"] or "{}")
@@ -221,33 +210,26 @@ def _save_meta(chat_id, kind, meta):
 
 
 def _seize_business(chat_id, kind, biz):
-    """Неуплата: штраф = месячная оплата по прайсу. Касса бизнеса идёт в счёт
-    штрафа первой, затем наличные (в минус) и банковский счёт. Бизнес возвращается боту,
-    улучшения сбрасываются."""
     owner = biz["owner_vk"]
     fine = BIZ[kind]["fee"]
     from db import get_user_readonly, update_balance
 
-    # 0. касса бизнеса покрывает штраф первой (не сгорает)
     pocket_taken = 0
     try:
         pocket_taken = int(db.biz_withdraw_pocket(chat_id, kind) or 0)
     except Exception:
-        logger.exception("дренаж кассы при изъятии %s/%s", chat_id, kind)
+        pass
     remaining = max(fine - pocket_taken, 0)
-    logger.info("Изъятие %s/%s: штраф %s, касса покрыла %s", chat_id, kind, fine, pocket_taken)
 
     user = get_user_readonly(owner) or {}
     cash_all = int(user.get("balance") or 0)
 
-    # 1. остаток штрафа покрывается наличными (но не больше суммы)
     cash = min(max(cash_all, 0), remaining)
     if cash > 0:
         update_balance(owner, -cash)
 
     remaining -= cash
 
-    # 2. дренаж банковского счёта
     bank_taken = 0
     info = None
     try:
@@ -259,16 +241,14 @@ def _seize_business(chat_id, kind, biz):
         if bank_taken > 0:
             bank_withdraw(owner, bank_taken)
     except Exception:
-        logger.exception("дренаж банка при изъятии %s/%s", chat_id, kind)
+        pass
 
     debt = remaining - bank_taken
 
-    # 3. остаток штрафа — наличные в минус
     final_balance = None
     if debt > 0:
         final_balance = update_balance(owner, -debt)
 
-    # 4. бизнес уходит боту
     db.biz_update(chat_id, kind, owner_vk=BOT_OWNER, upgrades=0, pocket=0, paid_until=None)
 
     name = BIZ[kind]["emoji"] + " " + BIZ[kind]["name"]
@@ -295,12 +275,9 @@ def _seize_business(chat_id, kind, biz):
         send_plain(owner, text)
     except Exception:
         pass
-    logger.info("Бизнес %s/%s изъят у %s: штраф %s (наличные %s, банк %s, долг %s)",
-                chat_id, kind, owner, fine, cash, bank_taken, debt)
 
 
 def _remind_owner(chat_id, kind, biz, left):
-    """ЛС-напоминание об оплате — не чаще раза в сутки."""
     owner = biz["owner_vk"]
     meta = _load_meta(biz)
     today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
@@ -337,11 +314,10 @@ def _remind_owner(chat_id, kind, biz, left):
             keyboard=json.dumps(keyboard),
         )
     except Exception as error:
-        logger.warning("Напоминание об оплате не доставлено %s: %s", owner, error)
+        pass
 
 
 def maybe_maintenance(chat_id, throttled=False, force=False):
-    """Проверка просрочек/напоминаний по бизнесам чата. Потобезопасно."""
     now = time.monotonic()
     with _MAINTENANCE_LOCK:
         last = _last_maintenance.get(chat_id, 0.0)
@@ -364,8 +340,6 @@ def maybe_maintenance(chat_id, throttled=False, force=False):
         grace_deadline = paid_until + datetime.timedelta(days=GRACE_DAYS)
         if datetime.datetime.now(datetime.timezone.utc) > grace_deadline:
             _seize_business(chat_id, kind, biz)
-
-# ----------------------------- UI: сессии и экраны -----------------------------
 
 
 def _send_event_answer(event_id, user_id, peer_id, text):
@@ -397,7 +371,6 @@ def _send_event_answer(event_id, user_id, peer_id, text):
 
 
 def _temp_chat_message(peer_id, text):
-    """Фолбэк как в coin._reject: сообщение в чат, удаляется через 7 секунд."""
     try:
         sent = vk.messages.send(peer_id=peer_id, message=text, random_id=random.randrange(2 ** 31))
         mid = _extract_message_id(sent)
@@ -412,11 +385,10 @@ def _temp_chat_message(peer_id, text):
         timer.daemon = True
         timer.start()
     except Exception:
-        logger.exception("Не удалось отправить временное сообщение peer_id=%s", peer_id)
+        pass
 
 
 def _snack(event_id, user_id, peer_id, text):
-    """Точная копия coin._reject: активный ответ на событие, иначе временное сообщение."""
     delivered = False
     if event_id and user_id and peer_id:
         delivered = _send_event_answer(event_id, user_id, peer_id, text[:90])
@@ -482,7 +454,6 @@ def _arm_timer(session):
 
 
 def _kb(sid, rows):
-    """Клавиатура бизнеса. Цвет — поле уровня кнопки («color»), не внутри «action»."""
     buttons = []
     for row in rows:
         line = []
@@ -502,7 +473,6 @@ def _kb(sid, rows):
 
 
 def _send_view(session, text, keyboard=None):
-    """Редактируем сообщение сессии; без cmid — отправляем новое."""
 
     def _work():
         cmid = session.get("cmid")
@@ -516,10 +486,9 @@ def _send_view(session, text, keyboard=None):
                 if keyboard is not None:
                     edit_kwargs["keyboard"] = json.dumps(keyboard)
                 result = vk.messages.edit(**edit_kwargs)
-                logger.info("BIZ edit ok cmid=%s -> %s", cmid, bool(result))
                 return
             except Exception as error:
-                logger.warning("BIZ edit fail cmid=%s: %s", cmid, error)
+                pass
         _delete_view(session)
         try:
             kwargs = {
@@ -531,14 +500,11 @@ def _send_view(session, text, keyboard=None):
                 kwargs["keyboard"] = json.dumps(keyboard)
             sent = vk.messages.send(**kwargs)
             new_cmid = _extract_message_id(sent)
-            logger.info("BIZ send ok cmid=%s", new_cmid)
             if new_cmid:
                 session["cmid"] = new_cmid
         except Exception:
-            logger.exception("Не удалось отправить экран бизнесов")
+            pass
 
-    # Синхронно: VK держит callback ~3 c, экран должен обновиться до ответа,
-    # иначе клиент показывает вечный спиннер.
     _work()
 
 
@@ -554,7 +520,6 @@ def _new_session(user, message):
     _arm_timer(session)
     return session
 
-# ----------------------------- UI: тексты экранов -----------------------------
 
 _KIND_ORDER = ("bank", "blackjack", "coin", "roulette")
 
@@ -605,7 +570,6 @@ _CHAT_TITLES_LOCK = threading.Lock()
 
 
 def _chat_title(peer_id):
-    """Название беседы (кэш на процесс) — для заголовков и напоминаний об оплате."""
     if not peer_id:
         return ""
     with _CHAT_TITLES_LOCK:
@@ -620,7 +584,7 @@ def _chat_title(peer_id):
             chat_settings = items[0].get("chat_settings") or {}
             title = chat_settings.get("title") or ""
     except Exception as error:
-        logger.debug("Не удалось получить название беседы %s: %s", peer_id, error)
+        pass
     if title:
         with _CHAT_TITLES_LOCK:
             _CHAT_TITLES[peer_id] = title
@@ -628,7 +592,6 @@ def _chat_title(peer_id):
 
 
 def check_text(chat_id, user, chat_title=""):
-    """Витрина: список всех бизнесов чата."""
     lines = ["💼 Бизнесы чата" + (" «%s»" % chat_title if chat_title else ""), ""]
     free = []
     for kind in _KIND_ORDER:
@@ -763,7 +726,6 @@ def manage_kb(chat_id, kind, sid, vk_id):
         fee = monthly_fee(int(biz.get("upgrades") or 0), kind)
         rows.append([("💸 Оплатить %s" % format_amount(fee), "pay_" + kind, "primary")])
 
-    # Один бизнес — назад некуда: «Закрыть» удаляет сообщение.
     if len(owned_kinds(chat_id, vk_id)) <= 1:
         rows.append([("❌ Закрыть", "close")])
     else:
@@ -814,7 +776,6 @@ def upgrades_kb(chat_id, kind, sid, vk_id):
     rows.append([("⬅ Назад", "manage_" + kind)])
     return _kb(sid, rows)
 
-# ----------------------------- Действия: покупка/улучшение/оплата/вывод -----------------------------
 
 def _balance(vk_id):
     from db import get_user_readonly
@@ -837,10 +798,8 @@ def _do_buy_from_bot(session, kind):
 
     update_balance(vk_id, -price)
     paid_until = _add_month(datetime.datetime.now(datetime.timezone.utc))
-    # Статистику не трогаем: покупатель видит историю заработка
     db.biz_update(chat_id, kind, owner_vk=vk_id, upgrades=0, pocket=0,
                   paid_until=paid_until)
-    logger.info("Бизнес %s/%s куплен %s за %s", chat_id, kind, vk_id, price)
     _send_view(session, manage_text(chat_id, kind, vk_id), manage_kb(chat_id, kind, session["sid"], vk_id))
     return "🎉 Поздравляю с покупкой «%s»!" % spec["name"]
 
@@ -862,7 +821,6 @@ def _do_upgrade(session, kind):
     update_balance(vk_id, -price)
     db.biz_update(chat_id, kind, upgrades=bought + 1)
     label = "Субсидия (−35% к оплате)" if utype == "subsidy" else "доход %d%%" % value
-    logger.info("Улучшение %s/%s #%s (%s)", chat_id, kind, bought + 1, label)
     _send_view(session, upgrades_text(chat_id, kind), upgrades_kb(chat_id, kind, session["sid"], vk_id))
     return "⬆ Улучшение куплено: %s!" % label
 
@@ -882,13 +840,11 @@ def _do_withdraw(session, kind):
     from db import update_balance
 
     update_balance(vk_id, int(got))
-    logger.info("Вывод из кассы %s/%s: %s → %s", chat_id, kind, got, vk_id)
     _send_view(session, manage_text(chat_id, kind, vk_id), manage_kb(chat_id, kind, session["sid"], vk_id))
     return "💰 В кассу вывели %s элитов 💎" % format_amount(int(got))
 
 
 def _do_pay_fee(session, kind):
-    """Оплата бизнеса: можно за 4 дня до срока; досрочная дата сохраняется."""
     chat_id = session["peer"]
     vk_id = session["vk"]
     biz = db.biz_get(chat_id, kind) or {}
@@ -904,9 +860,9 @@ def _do_pay_fee(session, kind):
     if not paid_until:
         new_due = _add_month(now)
     elif paid_until <= now:
-        new_due = _add_month(now)          # просрочка — платим от сегодняшнего дня
+        new_due = _add_month(now)
     else:
-        new_due = _add_month(paid_until)   # заранее — дата не съезжает
+        new_due = _add_month(paid_until)
     from db import update_balance
 
     update_balance(vk_id, -fee)
@@ -916,15 +872,11 @@ def _do_pay_fee(session, kind):
     rem["last"] = None
     meta["rem"] = rem
     _save_meta(chat_id, kind, meta)
-    logger.info("Оплата %s/%s: %s до %s", chat_id, kind, fee, new_due.isoformat())
     _send_view(session, manage_text(chat_id, kind, vk_id), manage_kb(chat_id, kind, session["sid"], vk_id))
     return "✅ Бизнес оплачен до %s!" % _fmt_date(new_due)
 
 
-# ----------------------------- Продажа -----------------------------
-
 def parse_sell_args(user, rest, message):
-    """бизнес продать @user/reply/id сумма → (target_id, amount, junk) или (None, None, hint)."""
     target_id, remaining = extract_target_id(rest, reply_message=message.get("reply_message"))
     amount = None
     for token in remaining.split():
@@ -978,7 +930,6 @@ def sell_ask_kb(kind, buyer_id, amount, sid):
 
 
 def _bot_sell_price(kind):
-    """Гос.цена выкупа ботом: 50% от базовой цены бизнеса."""
     return BIZ[kind]["price"] * BOT_GOVERNMENT_PRICE_PCT // 100
 
 
@@ -1020,7 +971,6 @@ def _sell_kb(kind, buyer_id, amount, sid):
 
 
 def _sell_to_bot(session, kind):
-    """Продажа бизнеса боту: госцена, без подтверждения покупателя."""
     chat_id = session["peer"]
     seller_id = session["vk"]
     biz = db.biz_get(chat_id, kind) or {}
@@ -1036,7 +986,6 @@ def _sell_to_bot(session, kind):
         update_balance(seller_id, pocket)
     db.biz_update(chat_id, kind, owner_vk=BOT_OWNER, upgrades=0, pocket=0, paid_until=None)
     spec = BIZ[kind]
-    logger.info("Продажа боту %s/%s: %s за %s (гос.)", chat_id, kind, seller_id, price)
     _close_session(session)
     return {
         "snack": (
@@ -1050,7 +999,6 @@ DEAL_TTL_SECONDS = 120
 
 
 def _edit_offer(deal, text):
-    """Финальное состояние оффера: редактируем сообщение сделки, убираем кнопки."""
     cmid = deal.get("cmid")
     if not cmid:
         return
@@ -1062,12 +1010,10 @@ def _edit_offer(deal, text):
             keyboard="",
         )
     except Exception as error:
-        logger.warning("Не удалось отредактировать оффер сделки: %s", error)
+        pass
 
 
 def start_deal(session, kind, buyer_id, amount):
-    """Продавец подтвердил: его сообщение удаляется, покупателю уходит оффер.
-    Оффер живёт 2 минуты, потом тихо удаляется."""
     chat_id = session["peer"]
     seller_id = session["vk"]
     deal_id = uuid.uuid4().hex[:8]
@@ -1105,7 +1051,7 @@ def start_deal(session, kind, buyer_id, amount):
         )
         cmid = _extract_message_id(sent)
     except Exception:
-        logger.exception("Не удалось отправить предложение о сделке")
+        pass
     with _DEALS_LOCK:
         DEALS[deal_id] = {
             "chat": chat_id, "kind": kind,
@@ -1134,7 +1080,6 @@ def start_deal(session, kind, buyer_id, amount):
 
 
 def cancel_deal(deal_id, actor_id, peer_id):
-    """Покупатель отказался от оффера: редактируем его в отказ."""
     with _DEALS_LOCK:
         deal = DEALS.get(deal_id)
     if not deal or deal["chat"] != peer_id:
@@ -1175,7 +1120,6 @@ def confirm_deal(deal_id, actor_id, peer_id, event_id=None, user_id=None):
         _edit_offer(deal, "❌ Сделка отменена: у покупателя не хватает элитов.")
         return None
 
-    # Касса — продавцу, улучшения — в сброс.
     pocket = int(biz.get("pocket") or 0)
     if pocket > 0:
         db.biz_withdraw_pocket(chat_id, kind)
@@ -1189,11 +1133,8 @@ def confirm_deal(deal_id, actor_id, peer_id, event_id=None, user_id=None):
     if pocket > 0:
         update_balance(seller_id, pocket)
 
-    # Улучшения сбрасываются, статистика остаётся для витрины
     db.biz_update(chat_id, kind, owner_vk=buyer_id, upgrades=0, pocket=0)
-    logger.info("Сделка %s/%s: %s → %s за %s", chat_id, kind, seller_id, buyer_id, amount)
 
-    # Оффер редактируется в итог сделки — отдельных сообщений в чат не шлём.
     _edit_offer(
         deal,
         (
@@ -1214,10 +1155,9 @@ def confirm_deal(deal_id, actor_id, peer_id, event_id=None, user_id=None):
 
         send_business_receipts(seller_id, buyer_id, spec["name"], amount, commission, net)
     except Exception:
-        logger.exception("Чеки о сделке не отправлены")
+        pass
     return None
 
-# ----------------------------- Роутинг и команды -----------------------------
 
 def _route(session, act):
     chat_id, vk_id, sid = session["peer"], session["vk"], session["sid"]
@@ -1236,7 +1176,6 @@ def _route(session, act):
             _send_view(session, check_text(chat_id, session, chat_title=_chat_title(chat_id)), check_kb(chat_id, sid))
             return None
         if len(kinds) == 1:
-            # Один бизнес — сразу управление, без списка выбора.
             kind = kinds[0]
             _send_view(session, manage_text(chat_id, kind, vk_id), manage_kb(chat_id, kind, sid, vk_id))
             return None
@@ -1351,8 +1290,6 @@ def _route(session, act):
         biz = db.biz_get(chat_id, kind) or {}
         if int(biz.get("owner_vk") or 0) != int(vk_id):
             return {"snack": "Это уже не ваш бизнес!"}
-        # Порядок как проснулся пользователь: удаляем экран продавца,
-        # затем покупателю уходит отдельный оффер.
         _close_session(session)
         return {"snack": start_deal(session, kind, buyer_id, amount)}
 
@@ -1360,43 +1297,29 @@ def _route(session, act):
 
 
 def handle_message_event(data):
-    """Callback-события клавиатур бизнесов (в т.ч. из ЛС-напоминаний)."""
     obj = data.get("object") or {}
     payload_raw = obj.get("payload")
     if not payload_raw:
         return False
-    # VK может прислать payload строкой ИЛИ уже словарём (как у bank/inventory).
     if isinstance(payload_raw, str):
         try:
             payload = json.loads(payload_raw)
         except Exception:
-            logger.warning("BIZ event: нечитаемый payload %r", payload_raw[:200])
             return False
     else:
         payload = payload_raw
     if not isinstance(payload, dict) or payload.get("type") != "biz":
         return False
 
-    # user_id живёт в object (как у bank/inventory); в теле события его нет.
     user_id = int(data.get("user_id") or obj.get("user_id") or 0)
     peer_id = int(data.get("peer_id") or obj.get("peer_id") or 0)
-    # event_id живёт в object (как у blackjack/coin); в теле его может не быть.
     event_id = obj.get("event_id") or data.get("event_id")
-    logger.info(
-        "BIZ event act=%s sid=%s user=%s peer=%s cmid=%s",
-        payload.get("act"),
-        payload.get("sid"),
-        user_id,
-        peer_id,
-        obj.get("conversation_message_id"),
-    )
 
-    # Свежий cmid кнопки — чтобы редактирование попадало в нужное сообщение.
     sid = payload.get("sid")
     with _SESSIONS_LOCK:
         session0 = SESSIONS.get(sid)
     if not session0 or session0.get("status") != "active":
-        logger.info("BIZ event: сессия %r не найдена/неактивна", sid)
+        pass
     clicked_cmid = obj.get("conversation_message_id")
     if session0 and clicked_cmid and session0.get("cmid") != clicked_cmid:
         session0["cmid"] = clicked_cmid
@@ -1404,11 +1327,8 @@ def handle_message_event(data):
     try:
         answer = _handle_payload(payload, user_id, peer_id, event_id, obj)
     except Exception:
-        logger.exception("Ошибка обработки события бизнесов")
         answer = {"snack": "⚠️ Ошибка, попробуйте ещё раз"}
 
-    # Контракт main.py: возвращаем {"type":"show_snackbar"} — HTTP-ответ гасит
-    # спиннер кнопки. Дублируем активной доставкой как coin/_inventory.
     snack_text = ""
     if isinstance(answer, dict):
         if answer.get("snack"):
@@ -1417,14 +1337,12 @@ def handle_message_event(data):
             snack_text = str(answer.get("text") or "")
     if not snack_text:
         return None
-    # Активный ответ на событие (как coin._reject): POST + фолбэк-сообщение.
     return _snack(event_id, user_id, peer_id, snack_text)
 
 
 def _handle_payload(payload, user_id, peer_id, event_id, obj):
     act = payload.get("act") or ""
 
-    # Кнопка оплаты из ЛС-напоминания — открываем сессию в чате бизнеса.
     if act == "pay" and peer_id < CHAT_PEER_ID_MIN:
         chat_id = int(payload.get("chat") or 0)
         kind = payload.get("kind")
@@ -1447,13 +1365,11 @@ def _handle_payload(payload, user_id, peer_id, event_id, obj):
                 pass
         return None
 
-    # Подтверждение сделки покупателем.
     if act == "deal":
         deal_id = payload.get("id")
         confirm_deal(deal_id, user_id, peer_id, event_id, user_id)
         return {"snack": "🤝 Сделка обрабатывается..."}
 
-    # Отмена оффера покупателем.
     if act == "deal_cancel":
         return {"snack": cancel_deal(payload.get("id"), user_id, peer_id)}
 
@@ -1461,8 +1377,6 @@ def _handle_payload(payload, user_id, peer_id, event_id, obj):
     with _SESSIONS_LOCK:
         session = SESSIONS.get(sid)
     if not session or session.get("status") != "active":
-        # Рестарт бота или TTL: старые кнопки «мёртвые». Объясняем — иначе
-        # VK-клиент бесконечно крутит спиннер на нажатии.
         return {
             "type": "show_snackbar",
             "text": "⏳ Меню устарело. Отправьте «бизнес» или «бизнес чек» заново",
@@ -1476,7 +1390,6 @@ def _handle_payload(payload, user_id, peer_id, event_id, obj):
 
 @command("бизнес")
 def cmd_biz(user, args, message):
-    """Команда: бизнес / бизнес чек / бизнес продать @юзер сумма."""
     peer = message.get("peer_id") or 0
     vk_id = user["vk_id"]
     rest = (args or "").strip()

@@ -1,6 +1,4 @@
 
-"""Каталог предметов, кейсов и титулов ELITE CASE."""
-
 import random
 
 KEY_PRICE = 30_000
@@ -45,8 +43,6 @@ CASE_ALIASES = {
     "элитный": "case_elite", "элита": "case_elite",
 }
 
-# kind: elite -> value = сумма элитов; item -> value = ключ предмета;
-# title -> value = ключ титула
 _ROLLS = {
     "case_bomzh": [
         ("elite", 100, 280), ("elite", 200, 240), ("elite", 500, 200),
@@ -99,7 +95,6 @@ def roll_case(case_key):
 
 
 def advent_reward(vk_id, cycle, day, owns_title):
-    """Детерминированная награда за день цикла (1..10). Один предмет в день."""
     rng = random.Random("advent:%s:%s:%s" % (vk_id, cycle, day))
 
     def title_or_elite(candidates, fallback_amount):

@@ -1,6 +1,3 @@
-
-"""Промокоды: активация командой «промо <код>», ответ всегда реплаем."""
-
 import datetime
 import json
 
@@ -20,7 +17,6 @@ MSK = datetime.timezone(datetime.timedelta(hours=3))
 
 
 def _item_name(item_key, qty):
-    """Человекочитаемое имя предмета/кейса/титула с эмодзи."""
     if item_key in CASES:
         base = CASES[item_key]["name"].replace("📦 ", "")
         return f"📦 {base}"
@@ -34,7 +30,6 @@ def _item_name(item_key, qty):
 
 
 def _reward_line(reward, idx):
-    """Одна строка списка подарков с эмодзи."""
     rtype = reward.get("type")
     qty = reward.get("qty", 1)
     if rtype == "elite":
@@ -60,7 +55,6 @@ def _reward_texts(rewards):
 
 
 def _apply_rewards(vk_id, rewards):
-    """Выдаёт награды. Возвращает список успешно выданных строк."""
     given = []
     for i, r in enumerate(rewards or [], 1):
         rtype = r.get("type")
@@ -82,7 +76,6 @@ def _apply_rewards(vk_id, rewards):
 def cmd_promo(user, args, message):
     raw = (args or "").strip().strip('"«» ')
 
-    # ── DEV: создание промокода. промо создать <код>\n<лимит>\n<часы>\n<json-rewards> ──
     if raw.lower().startswith("создать"):
         from config import config
         from handlers.inventory import _is_dev, bot_mention
@@ -150,12 +143,11 @@ def cmd_promo(user, args, message):
             f"\n🎁 Внутри:\n{gift_text}"
         )
 
-    # ── Активация юзером ──
     code = raw.split()[0].upper() if raw else ""
     if not code:
         return (
             "🎟️ Укажи промокод!\n\n"
-            "Пример: „промо SEYCH“\n"
+            "Пример: „промо SEYCH"\n"
             "Команда выдаёт тебе подарки от бота 🎁"
         )
 
@@ -173,7 +165,6 @@ def cmd_promo(user, args, message):
         return "⚠️ Вы уже вводили этот промокод."
 
     if not db.promo_take_claim(code):
-        # конкурентно могли исчерпать лимит/срок между проверками
         return "🚫 Этот промокод недействителен."
 
     db.promo_mark_claimed(code, user["vk_id"])

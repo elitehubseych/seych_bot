@@ -1,5 +1,4 @@
 
-
 def plural(n, one, few, many):
     n = abs(int(n)) % 100
     if 11 <= n <= 14:

@@ -1,5 +1,4 @@
 import json
-import logging
 import random
 import threading
 import uuid
@@ -16,8 +15,6 @@ from handlers.coin import (
 )
 from utils.parse import format_amount, parse_amount
 from utils.vk import display_name_by_vk_id, vk
-
-logger = logging.getLogger(__name__)
 
 SESSIONS = {}
 SESSIONS_LOCK = threading.Lock()
@@ -45,7 +42,6 @@ def _card_str(card):
 
 
 def _hand_value(cards):
-    """Сумма руки: туз = 11, но при переборе падает до 1 (А+А = 12)."""
     total = sum(RANK_VALUE[r] for r, _ in cards)
     aces = sum(1 for r, _ in cards if RANK_VALUE[r] == 11)
     while total > 21 and aces:
@@ -100,15 +96,8 @@ ASYNC_SEND = True
 
 
 def _send_view(session, text, keyboard=None, reply_to=None):
-    """Редактируем сообщение сессии; без cmid — отправляем новое.
-
-    Отправка идёт в фоне: VK ждёт ответ на нажатие кнопки всего 3 секунды,
-    а запрос к API из облака может занять 1-2 с — иначе кнопка «грузит».
-    reply_to игнорируется: реплаи часто падают и нагружают чат.
-    """
 
     def _work():
-        # Сначала пробуем отредактировать существующее сообщение — меньше спама.
         cmid = session.get("cmid")
         if cmid:
             try:
@@ -123,7 +112,6 @@ def _send_view(session, text, keyboard=None, reply_to=None):
                     return
             except Exception:
                 pass
-        # Edit не удался — отправляем новое, НЕ удаляя старое.
         try:
             params = {
                 "peer_ids": [session["peer_id"]],
@@ -135,7 +123,7 @@ def _send_view(session, text, keyboard=None, reply_to=None):
             sent = vk.messages.send(**params)
             session["cmid"] = _extract_message_id(sent) or session.get("cmid")
         except Exception:
-            logger.exception("Не удалось отправить экран блэкджека sid=%s", session.get("sid"))
+            pass
 
     if ASYNC_SEND:
         threading.Thread(target=_work, daemon=True).start()
@@ -164,7 +152,6 @@ def _kb(sid, rows):
 
 
 def _table_text(session):
-    """Общий верх таблицы: ставки и карты."""
     player = session["player"]
     dealer_shown = session["dealer"][:1]
 
@@ -229,7 +216,6 @@ def _start_timeout(session):
 
 
 def _refund_bet(session, reason_text):
-    """Возвращает ставку игроку (страховка к этому моменту уже решена)."""
     db.update_balance(session["vk"], session["bet"])
     _delete_view(session)
     SESSIONS.pop(session["sid"], None)
@@ -240,7 +226,7 @@ def _refund_bet(session, reason_text):
             random_id=random.randrange(2 ** 31),
         )
     except Exception:
-        logger.exception("Не удалось отправить сообщение о возврате sid=%s", session.get("sid"))
+        pass
 
 
 def _timeout_session(sid, gen):
@@ -269,7 +255,6 @@ def _timeout_session(sid, gen):
     try:
         _dealer_reveal_and_settle(session, "\n⏳ Время вышло — остаёшься на своих картах.")
     except Exception:
-        logger.exception("Таймаут-доигрыш не удался sid=%s", sid)
         session["status"] = "expired"
         _refund_bet(
             session,
@@ -278,7 +263,6 @@ def _timeout_session(sid, gen):
 
 
 def _cleanup_peer_sessions(peer_id):
-    """Новая игра в беседе гасит старую с полным возвратом ставки."""
     with SESSIONS_LOCK:
         stale = [
             s for s in SESSIONS.values()
@@ -295,7 +279,6 @@ def _cleanup_peer_sessions(peer_id):
 
 
 def _finish(session, outcome, extra=""):
-    """Завершает раздачу: расчёт по исходу + финальный экран с кнопками."""
     timer = session.get("timer")
     if timer:
         timer.cancel()
@@ -345,13 +328,11 @@ def _finish(session, outcome, extra=""):
 
 
 def _dealer_reveal_and_settle(session, extra=""):
-    """Вскрывает крупье, добирает до 17 (макс. 5 карт) и считает результат."""
     dealer = session["dealer"]
     player = session["player"]
     pv = _hand_value(player)
 
     if pv > 21:
-        # Классика: перебор игрока — мгновенный проигрыш, крупье не играет
         return _finish(session, "lose", f"Перебор ({pv}) — ставка сгорела.")
 
     if _is_blackjack(dealer):
@@ -426,7 +407,6 @@ def _act_double(session, event_id, user_id, peer_id):
     if _hand_value(session["player"]) > 21:
         return _finish(session, "lose", "Дабл не спас — перебор.")
 
-    # После дабла ход завершается сам: крупье играет
     return _dealer_reveal_and_settle(session) or None
 
 
@@ -450,7 +430,6 @@ def _user_balance(vk_id):
 
 
 def _process_act(session, user_id, act, event_id=None, peer_id=None, cmid=None):
-    """Вызывается под локом сессии. Возвращает payload снекбара или None."""
     if user_id != session["vk"]:
         return _reject(event_id, user_id, peer_id, _self_click_message())
 
@@ -524,7 +503,6 @@ def _process_act(session, user_id, act, event_id=None, peer_id=None, cmid=None):
 
 
 def _new_round(peer_id, vk_id, bet, reply_to=None, reuse_cmid=None):
-    """Создаёт сессию, списывает ставку и сдаёт первые карты."""
     db.update_balance(vk_id, -bet)
     deck = _new_deck()
     player = [deck.pop(), deck.pop()]
@@ -546,7 +524,7 @@ def _new_round(peer_id, vk_id, bet, reply_to=None, reuse_cmid=None):
     upcard = dealer[0]
     player_bj = _is_blackjack(player)
     if dict(RANKS)[upcard[0]] == 11:
-        session["phase"] = "insurance"  # туз крупье — выбор страховки
+        session["phase"] = "insurance"
         note = f"🛡 У {_bot_name()} туз! Можно застраховаться за полставки."
     elif player_bj:
         session["phase"] = "done"
@@ -575,7 +553,7 @@ def cmd_blackjack(user, args, message):
     else:
         bet = parse_amount(raw, default=None)
         if bet is None and raw:
-            return None  # мусор после команды — молчим
+            return None
         bet = DEFAULT_STAKE if bet is None else bet
 
     if bet < MIN_STAKE:
@@ -606,7 +584,7 @@ def cmd_blackjack(user, args, message):
                 random_id=random.randrange(2 ** 31),
             )
         except Exception:
-            logger.exception("Не удалось отправить предупреждение о раздаче")
+            pass
         return None
 
     _cleanup_peer_sessions(peer_id)
@@ -645,7 +623,6 @@ def handle_bj_event(data):
         session = SESSIONS.get(sid)
     if not session or session.get("status") not in ("active", "finished"):
         if session is None:
-            # Сессии нет (рестарт бота) — убираем мёртвые кнопки из чата
             _delete_orphan_view(obj, peer_id)
         return DEAD_SESSION
 

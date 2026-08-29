@@ -1,5 +1,4 @@
 
-import logging
 import threading
 
 import db
@@ -8,8 +7,6 @@ from handlers.registry import command
 from utils.parse import extract_target_id, format_amount, parse_amount
 from utils.receipt import generate_transaction_id, send_transfer_receipts
 from utils.vk import display_name, display_name_by_vk_id
-
-logger = logging.getLogger(__name__)
 
 COMMISSION_RATE = 0.05
 DEFAULT_AMOUNT = 1000
