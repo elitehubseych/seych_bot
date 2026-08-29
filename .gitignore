@@ -1,0 +1,17 @@
+# Секреты
+.env
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Виртуальные окружения
+venv/
+.venv/
+
+# Прочее
+.DS_Store
+Thumbs.db
+*.log
+plans_developen.txt
