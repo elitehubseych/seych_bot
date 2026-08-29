@@ -69,18 +69,26 @@ def check_mute_notify(vk_id, peer_id, text):
 
     number = int(m.group(7))
     unit = m.group(8).lower()
+
+    def _decl(n, one, two, five):
+        if n % 10 == 1 and n % 100 != 11:
+            return one
+        if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+            return two
+        return five
+
     if "секунд" in unit:
-        duration = f"{number} сек."
+        duration = "%d %s" % (number, _decl(number, "секунду", "секунды", "секунд"))
     elif "минут" in unit:
-        duration = f"{number} мин."
+        duration = "%d %s" % (number, _decl(number, "минуту", "минуты", "минут"))
     elif "час" in unit:
-        duration = f"{number} ч."
+        duration = "%d %s" % (number, _decl(number, "час", "часа", "часов"))
     elif "дн" in unit or "день" in unit:
-        duration = f"{number} дн."
+        duration = "%d %s" % (number, _decl(number, "день", "дня", "дней"))
     elif "недел" in unit:
-        duration = f"{number} нед."
+        duration = "%d %s" % (number, _decl(number, "неделю", "недели", "недель"))
     elif "месяц" in unit:
-        duration = f"{number} мес."
+        duration = "%d %s" % (number, _decl(number, "месяц", "месяца", "месяцев"))
     else:
         duration = f"{number} {unit}"
 
