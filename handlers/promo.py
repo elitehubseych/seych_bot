@@ -147,7 +147,7 @@ def cmd_promo(user, args, message):
     if not code:
         return (
             "🎟️ Укажи промокод!\n\n"
-            "Пример: „промо SEYCH"\n"
+            "Пример: «промо SEYCH»\n"
             "Команда выдаёт тебе подарки от бота 🎁"
         )
 
