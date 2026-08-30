@@ -16,7 +16,6 @@ from handlers.coin import schedule_unmute
 from handlers.inventory import handle_message_event as handle_inventory_event
 from handlers.marriage import handle_message_event as handle_marriage_event
 from handlers.messages import handle_message_new
-import handlers.admin
 import handlers.commands
 import handlers.promo
 
