@@ -1,0 +1,25 @@
+{
+  "group_id": 218136766,
+  "type": "message_new",
+  "event_id": "test-event-1",
+  "v": "5.199",
+  "object": {
+    "message": {
+      "date": 1789929294,
+      "from_id": 532796366,
+      "id": 0,
+      "version": 10186149,
+      "out": 0,
+      "fwd_messages": [],
+      "important": false,
+      "is_hidden": false,
+      "attachments": [],
+      "conversation_message_id": 276657,
+      "text": "Адвент",
+      "is_unavailable": true,
+      "peer_id": 2000000015,
+      "random_id": 0
+    }
+  }
+}
+
