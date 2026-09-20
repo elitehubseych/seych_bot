@@ -2,9 +2,13 @@
 import json
 import threading
 import time
+import logging
 
 import flask
 from flask import Flask, request
+
+# Basic logging so our handlers' INFO/ERROR appear in Render logs
+logging.basicConfig(level=logging.INFO)
 
 import db
 from config import config
