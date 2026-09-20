@@ -8,6 +8,9 @@ import psycopg2.extras
 from psycopg2.pool import ThreadedConnectionPool
 
 from config import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TransferRejected(Exception):
@@ -211,7 +214,8 @@ def get_user(vk_id):
                 )
                 user = cur.fetchone()
             return dict(user)
-    except psycopg2.Error:
+    except psycopg2.Error as e:
+        logger.exception("get_user failed for vk_id=%s", vk_id)
         return None
 
 
@@ -221,7 +225,8 @@ def get_user_readonly(vk_id):
             cur.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
             user = cur.fetchone()
             return dict(user) if user else None
-    except psycopg2.Error:
+    except psycopg2.Error as e:
+        logger.exception("get_user_readonly failed for vk_id=%s", vk_id)
         return None
 
 
