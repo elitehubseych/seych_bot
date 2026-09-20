@@ -236,6 +236,30 @@ def serve_mini_app(path="index.html"):
     return flask.send_file(file_path)
 
 
+@app.route("/debug/schema", methods=["GET"])
+def debug_schema():
+    key = flask.request.headers.get("X-Debug-Key")
+    if not key or str(key) != str(config.DEV_ID):
+        return ("forbidden", 403)
+    try:
+        conn = db.get_connection()
+    except Exception as e:
+        return flask.jsonify({"ok": False, "error": f"connect_failed: {e}"}), 500
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position;")
+            cols = [r[0] for r in cur.fetchall()]
+            try:
+                cur.execute("SELECT * FROM users LIMIT 1;")
+                rows = cur.fetchall()
+            except Exception:
+                rows = None
+        return flask.jsonify({"ok": True, "columns": cols, "sample": rows})
+    except Exception as e:
+        import traceback
+        return flask.jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
+
+
 if __name__ == "__main__":
     try:
         from waitress import serve
