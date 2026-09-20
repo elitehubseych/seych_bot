@@ -91,7 +91,9 @@ def callback():
             peer_id = msg.get("peer_id")
             if isinstance(text, str) and text.strip().lower() == "echo_test":
                 try:
-                    vk_api.messages.send(peer_id=peer_id, message="ECHO_OK", random_id=0)
+                    sent = vk_api.messages.send(peer_id=peer_id, message="ECHO_OK", random_id=0)
+                    import logging
+                    logging.getLogger(__name__).info("echo sent result=%s peer=%s", sent, peer_id)
                 except Exception as err:
                     import logging
                     logging.exception("echo send failed")
