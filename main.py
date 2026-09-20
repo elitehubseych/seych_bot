@@ -22,6 +22,7 @@ from handlers.marriage import handle_message_event as handle_marriage_event
 from handlers.messages import handle_message_new
 import handlers.commands
 import handlers.promo
+from utils.vk import vk as vk_api
 
 from handlers.registry import DEAD_SESSION
 
@@ -82,6 +83,21 @@ def callback():
         age_sec = time.time() - msg_date if isinstance(msg_date, (int, float)) else 0
         if age_sec > STALE_MESSAGE_SEC:
             return "ok"
+
+        # Quick synchronous echo test: if message text equals ECHO_TEST,
+        # try to send a direct message immediately to verify API/token.
+        try:
+            text = msg.get("text", "") or ""
+            peer_id = msg.get("peer_id")
+            if isinstance(text, str) and text.strip().lower() == "echo_test":
+                try:
+                    vk_api.messages.send(peer_id=peer_id, message="ECHO_OK", random_id=0)
+                except Exception as err:
+                    import logging
+                    logging.exception("echo send failed")
+                return "ok"
+        except Exception:
+            pass
 
         threading.Thread(target=handle_message_new, args=(data,), daemon=True).start()
     else:
